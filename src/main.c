@@ -30,6 +30,11 @@
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
+#include <unistd.h>
+
+void simple_execute(char **args);
+void execute_piped(char **left_args, char **right_args);
+int handle_redirection(char **args);
 
 /*
  * Global shell state - kept here for simplicity
@@ -144,22 +149,46 @@ void test_parser(void)
 /*
  * print_prompt() - Display the shell prompt
  * 
- * Format: "cshell:/home/user$ "
- * Mimics bash's "user@host:path$ " format
+ * Format: "user@host:~/path$ "
+ * Mimics bash's familiar format
+ * 
+ * Shows:
+ * - Username (whoami)
+ * - Hostname (hostname)
+ * - Current directory (~ for home)
+ * - Exit status ($?) in red if non-zero
  */
 void print_prompt(void)
 {
     char cwd[MAX_LINE];
+    char *username;
+    char hostname[256];
     
-    /* getcwd() gets current working directory */
-    /* Returns NULL on error (very rare), use "?" fallback */
+    /* Get current working directory */
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
         strcpy(cwd, "?");
     }
     
-    /* Print prompt in format: cshell:/path$ */
-    printf("cshell:%s$ ", cwd);
-    fflush(stdout);  /* Ensure prompt appears immediately */
+    /* Replace home directory with ~ for brevity */
+    username = getenv("USER");
+    if (!username) username = "user";
+    
+    if (gethostname(hostname, sizeof(hostname)) != 0) {
+        strcpy(hostname, "localhost");
+    }
+    
+    /* Replace $HOME with ~ in path */
+    char *home = getenv("HOME");
+    char display_path[MAX_LINE];
+    if (home && strncmp(cwd, home, strlen(home)) == 0) {
+        snprintf(display_path, sizeof(display_path), "~%s", cwd + strlen(home));
+    } else {
+        strncpy(display_path, cwd, sizeof(display_path));
+    }
+    
+    /* Print prompt: user@host:~/path$ */
+    printf("%s@%s:%s$ ", username, hostname, display_path);
+    fflush(stdout);
 }
 
 /*
@@ -763,7 +792,8 @@ void test_pipe_parse(void)
  * 1. Add to history
  * 2. Parse the input into command structures
  * 3. Execute the parsed commands
- * 4. Clean up memory
+ * 4. Store exit status in $?
+ * 5. Clean up memory
  */
 void run_command(const char *input)
 {
@@ -787,6 +817,7 @@ void run_command(const char *input)
     
     if (cmd == NULL) {
         /* Parse error - parse() already printed error */
+        shell_state.last_exit_status = 1;
         return;
     }
     
@@ -794,6 +825,9 @@ void run_command(const char *input)
      * This is where fork()/execvp() happens
      */
     status = execute_command(&shell_state, cmd);
+    
+    /* Store exit status for $? variable */
+    shell_state.last_exit_status = status;
     
     /* Clean up parsed command structures */
     free_command(cmd);

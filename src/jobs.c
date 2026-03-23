@@ -51,6 +51,9 @@ void init_shell(shell_t *shell)
     /* Initialize last working directory */
     shell->last_wd = NULL;
     
+    /* Initialize exit status to 0 ($? starts at 0) */
+    shell->last_exit_status = 0;
+    
     /* Get our own process group ID
      * 
      * INTERVIEW QUESTION: What is a process group?
@@ -331,31 +334,79 @@ char *get_history_entry(shell_t *shell, int index)
  * setup_signals() - Set up signal handlers
  * 
  * For interactive shell:
- * - SIGINT (Ctrl+C): interrupt current foreground job
- * - SIGTSTP (Ctrl+Z): stop current foreground job
- * - SIGQUIT (Ctrl+\): core dump (default ignore)
- * - SIGCHLD: child status change (default ignore)
+ * - SIGINT (Ctrl+C): IGNORE in shell, forwarded to foreground child
+ * - SIGTSTP (Ctrl+Z): IGNORE in shell, forwarded to foreground child
+ * - SIGQUIT (Ctrl+\): IGNORE - prevents core dumps
+ * - SIGCHLD: Default - allows waitpid() to work in parent
  * 
- * IMPORTANT: Signals must be handled properly:
- * - Parent must handle SIGCHLD to reap zombies
- * - Foreground process group gets the signals
+ * THE CRITICAL INSIGHT:
+ * When the shell receives SIGINT (Ctrl+C):
+ * - If shell is FOREGROUND: shell MUST ignore it (or shell dies!)
+ * - Child process receives SIGINT via process group
+ * - Only the CHILD should terminate, not the shell
+ * 
+ * This is why we set up signals BEFORE the REPL loop.
  */
 void setup_signals(void)
 {
     struct sigaction sa;
     
-    /* Ignore SIGQUIT (Ctrl+\) - prevents core dumps */
+    /*
+     * SIGINT (Ctrl+C) - IGNORE in shell
+     * 
+     * WHY IGNORE HERE:
+     * - The shell is the parent - we don't want it to die on Ctrl+C
+     * - When we fork children, they inherit this handler
+     * - BUT children will restore default before exec (or we kill them)
+     * - So Ctrl+C will only kill the foreground child
+     * 
+     * FLOW:
+     * 1. User presses Ctrl+C
+     * 2. Terminal sends SIGINT to FOREGROUND PROCESS GROUP
+     * 3. Child process receives SIGINT → terminates
+     * 4. Shell receives SIGINT → IGNORED → shell continues
+     */
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    
+    /*
+     * SIGTSTP (Ctrl+Z) - IGNORE in shell
+     * 
+     * Same logic as SIGINT:
+     * - Shell should not stop
+     * - Foreground child may stop (if it doesn't ignore)
+     */
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGTSTP, &sa, NULL);
+    
+    /*
+     * SIGQUIT (Ctrl+\) - IGNORE
+     * 
+     * Default action is terminate + core dump
+     * We ignore to prevent accidental core files
+     */
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGQUIT, &sa, NULL);
     
-    /* Default SIGCHLD handling - allows wait() to work
-     * Some systems need explicit handler for reliable behavior
+    /*
+     * SIGCHLD - Default handling
+     * 
+     * Default handling means "ignore" - waitpid() will still work.
+     * We don't need a handler because we call reap_zombies()
+     * periodically in the REPL loop.
+     * 
+     * Alternative: Set up a handler that marks a flag,
+     * then reap in main loop. We use the simple approach.
      */
     sa.sa_handler = SIG_DFL;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;
+    sa.sa_flags = SA_RESTART;  /* Restart interrupted syscalls */
     sigaction(SIGCHLD, &sa, NULL);
 }
 

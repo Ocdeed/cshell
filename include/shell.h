@@ -130,6 +130,7 @@ typedef struct shell {
     char *last_wd;         /* Previous working directory for cd - */
     int shell_pgid;        /* Process group ID of the shell */
     int interactive;        /* Are we running interactively? */
+    int last_exit_status;   /* Exit status of last command ($?) */
 } shell_t;
 
 /*
