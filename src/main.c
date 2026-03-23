@@ -21,6 +21,7 @@
  */
 
 #include "../include/shell.h"
+#include "../include/parser.h"
 #include "../include/builtins.h"
 #include "../include/jobs.h"
 #include <stdio.h>
@@ -34,6 +35,110 @@
  * In production, you'd pass this around as a parameter
  */
 shell_t shell_state;
+
+/*
+ * =============================================================================
+ * PARSER TEST - Demonstrates tokenization
+ * =============================================================================
+ * 
+ * Run with: ./cshell --test-parser
+ * 
+ * This tests the parse_input() function with various inputs.
+ */
+
+/*
+ * test_parser() - Test the parse_input() function
+ * 
+ * Demonstrates:
+ * - Basic space-separated tokens
+ * - Multiple spaces/tabs
+ * - Empty input
+ * - Single word
+ * - Preserves original input (non-destructive)
+ */
+void test_parser(void)
+{
+    printf("\n=== PARSER TEST ===\n\n");
+    
+    /* Test case 1: Basic tokens with multiple spaces */
+    printf("Test 1: Multiple spaces between words\n");
+    printf("Input:  \"ls    -la    /home\"\n");
+    char input1[] = "ls    -la    /home";
+    int argc1;
+    char **argv1 = parse_input(input1, &argc1);
+    printf("Tokens (%d):\n", argc1);
+    for (int i = 0; i < argc1; i++) {
+        printf("  [%d] \"%s\"\n", i, argv1[i]);
+    }
+    printf("NULL terminator: %s\n\n", argv1[argc1] == NULL ? "OK" : "MISSING!");
+    free_tokens(argv1);
+    
+    /* Test case 2: Leading and trailing whitespace */
+    printf("Test 2: Leading and trailing whitespace\n");
+    printf("Input:  \"   echo hello   \\t  world   \"\n");
+    char input2[] = "   echo hello     world   ";
+    int argc2;
+    char **argv2 = parse_input(input2, &argc2);
+    printf("Tokens (%d):\n", argc2);
+    for (int i = 0; i < argc2; i++) {
+        printf("  [%d] \"%s\"\n", i, argv2[i]);
+    }
+    free_tokens(argv2);
+    printf("\n");
+    
+    /* Test case 3: Single word */
+    printf("Test 3: Single word\n");
+    printf("Input:  \"ls\"\n");
+    char input3[] = "ls";
+    int argc3;
+    char **argv3 = parse_input(input3, &argc3);
+    printf("Tokens (%d):\n", argc3);
+    for (int i = 0; i < argc3; i++) {
+        printf("  [%d] \"%s\"\n", i, argv3[i]);
+    }
+    free_tokens(argv3);
+    printf("\n");
+    
+    /* Test case 4: Empty string */
+    printf("Test 4: Empty string\n");
+    printf("Input:  \"\"\n");
+    char input4[] = "";
+    int argc4;
+    char **argv4 = parse_input(input4, &argc4);
+    printf("Tokens (%d):\n", argc4);
+    printf("  (no tokens)\n");
+    if (argv4) free_tokens(argv4);
+    printf("\n");
+    
+    /* Test case 5: Original input preserved */
+    printf("Test 5: Original input preserved\n");
+    printf("Input:  \"original string\"\n");
+    char input5[] = "original string";
+    int argc5;
+    char **argv5 = parse_input(input5, &argc5);
+    printf("After parse, input is still: \"%s\"\n", input5);
+    printf("Note: We use strncpy, so original is NOT modified.\n");
+    free_tokens(argv5);
+    printf("\n");
+    
+    /* Test case 6: Path with spaces (NOT quoted - shows limitation) */
+    printf("Test 6: Path with spaces (educational - shows limitation)\n");
+    printf("Input:  \"/path/with spaces\"\n");
+    printf("Note:   Simple parser treats each word separately.\n");
+    printf("        Full parser would handle quotes: \"quoted string\"\n");
+    char input6[] = "/path/with spaces";
+    int argc6;
+    char **argv6 = parse_input(input6, &argc6);
+    printf("Tokens (%d):\n", argc6);
+    for (int i = 0; i < argc6; i++) {
+        printf("  [%d] \"%s\"\n", i, argv6[i]);
+    }
+    printf("This shows why we need QUOTE HANDLING for paths with spaces!\n");
+    free_tokens(argv6);
+    printf("\n");
+    
+    printf("=== END PARSER TEST ===\n\n");
+}
 
 /*
  * print_prompt() - Display the shell prompt
@@ -144,16 +249,20 @@ void run_command(const char *input)
  * main() - Shell entry point
  * 
  * Performs:
- * 1. One-time initialization
- * 2. The REPL loop
- * 3. Cleanup on exit
+ * 1. Command-line argument parsing
+ * 2. One-time initialization
+ * 3. The REPL loop (or tests)
+ * 4. Cleanup on exit
  */
 int main(int argc, char **argv)
 {
     char *line = NULL;
     
-    (void)argc;  /* Unused */
-    (void)argv;  /* Unused */
+    /* Check for test mode */
+    if (argc > 1 && strcmp(argv[1], "--test-parser") == 0) {
+        test_parser();
+        return 0;
+    }
     
     /* Initialize shell state (jobs list, etc.) */
     init_shell(&shell_state);

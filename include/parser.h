@@ -11,6 +11,46 @@
 #include "shell.h"
 
 /*
+ * =============================================================================
+ * SIMPLE TOKENIZER - Educational Implementation
+ * =============================================================================
+ */
+
+/*
+ * parse_input() - Split input string into tokens
+ * 
+ * Input:  "ls -la /home/user"
+ * Output: ["ls", "-la", "/home/user", NULL]
+ * 
+ * The returned array is NULL-terminated (required for execvp()).
+ * 
+ * Memory ownership:
+ * - Caller provides input string (don't free)
+ * - Caller must call free_tokens() when done
+ * 
+ * Usage:
+ *   char **argv;
+ *   int argc;
+ *   argv = parse_input(input, &argc);
+ *   // use argv...
+ *   free_tokens(argv);
+ */
+char **parse_input(char *input, int *argc);
+
+/*
+ * free_tokens() - Free memory from parse_input()
+ * 
+ * Must be called to prevent memory leaks!
+ */
+void free_tokens(char **argv);
+
+/*
+ * =============================================================================
+ * FULL TOKENIZER - Handles quotes, pipes, redirects, etc.
+ * =============================================================================
+ */
+
+/*
  * Token types - what kind of "word" we found in the input
  * Used by the tokenizer to categorize each piece of the input
  */

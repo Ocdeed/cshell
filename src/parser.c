@@ -22,6 +22,182 @@
 #include <string.h>
 
 /*
+ * =============================================================================
+ * SIMPLE TOKENIZER - Educational Implementation
+ * =============================================================================
+ * 
+ * This simpler function demonstrates the core concepts of tokenization.
+ * It handles spaces and tabs but NOT quotes or special characters.
+ * See tokenizer_next() for a full implementation.
+ */
+
+/*
+ * parse_input() - Split input string into tokens
+ * 
+ * Input:  "ls -la /home/user"
+ * Output: ["ls", "-la", "/home/user", NULL]
+ * 
+ * WHY THIS APPROACH (strtok vs manual):
+ * 
+ * Option 1: strtok()
+ *   - Thread-unsafe (uses static buffer)
+ *   - Modifies original string (destructive)
+ *   - Simpler code
+ *   
+ * Option 2: Manual pointer arithmetic (what we use)
+ *   - Thread-safe
+ *   - Non-destructive to original
+ *   - More control over memory
+ * 
+ * We choose manual approach because:
+ *   1. Shell parsing happens frequently (every command)
+ *   2. We might need the original string later (history)
+ *   3. Thread safety matters for background jobs
+ * 
+ * MEMORY STRATEGY:
+ * - Caller passes input string (we DON'T free it)
+ * - We allocate memory for EACH token (must be freed by caller)
+ * - We allocate the argv array (must be freed by caller)
+ * 
+ * Example cleanup:
+ *   char **argv;
+ *   int argc;
+ *   parse_input(input, &argc, &argv);
+ *   // use argv...
+ *   for (int i = 0; i < argc; i++) free(argv[i]);
+ *   free(argv);
+ */
+char **parse_input(char *input, int *argc)
+{
+    /* 
+     * Step 1: Count tokens first
+     * 
+     * We need to know how many tokens BEFORE allocating.
+     * This way we allocate exactly the right amount.
+     */
+    int token_count = 0;
+    char *ptr = input;
+    
+    /* Skip leading whitespace */
+    while (*ptr == ' ' || *ptr == '\t') ptr++;
+    
+    /* Count tokens by finding whitespace boundaries */
+    while (*ptr != '\0') {
+        /* Found start of a token */
+        token_count++;
+        
+        /* Skip to end of token (next whitespace or end) */
+        while (*ptr != ' ' && *ptr != '\t' && *ptr != '\0') {
+            ptr++;
+        }
+        
+        /* Skip trailing whitespace */
+        while (*ptr == ' ' || *ptr == '\t') {
+            ptr++;
+        }
+    }
+    
+    /*
+     * Step 2: Allocate memory
+     * 
+     * We allocate:
+     * - token_count + 1 for NULL terminator
+     * - Each token needs its own allocation (strdup)
+     * 
+     * The +1 is for NULL termination (CRITICAL for execvp)
+     */
+    char **argv = malloc((token_count + 1) * sizeof(char *));
+    if (!argv) return NULL;
+    
+    /*
+     * Step 3: Extract tokens
+     * 
+     * We use a two-pointer approach:
+     * - start: beginning of current token
+     * - end: end of current token
+     */
+    int i = 0;
+    ptr = input;
+    
+    /* Skip leading whitespace again */
+    while (*ptr == ' ' || *ptr == '\t') ptr++;
+    
+    while (*ptr != '\0' && i < token_count) {
+        char *start = ptr;
+        size_t len = 0;
+        
+        /* Find length of token */
+        while (ptr[len] != ' ' && ptr[len] != '\t' && ptr[len] != '\0') {
+            len++;
+        }
+        
+        /* 
+         * Allocate and copy token
+         * 
+         * strdup() does: malloc(len + 1) + memcpy + null terminator
+         * It's equivalent to:
+         *   char *token = malloc(len + 1);
+         *   strncpy(token, start, len);
+         *   token[len] = '\0';
+         */
+        argv[i] = malloc(len + 1);
+        if (argv[i]) {
+            strncpy(argv[i], start, len);
+            argv[i][len] = '\0';
+        }
+        i++;
+        
+        /* Move past this token */
+        ptr += len;
+        
+        /* Skip whitespace to next token */
+        while (*ptr == ' ' || *ptr == '\t') ptr++;
+    }
+    
+    /* 
+     * NULL TERMINATION - CRITICAL!
+     * 
+     * execvp() requires a NULL-terminated array!
+     * Without this, execvp() will read garbage memory.
+     * 
+     * What NULL termination means:
+     * - argv[argc] = NULL (last element is NULL)
+     * - This tells execvp() where the arguments end
+     * - Without it, execvp() doesn't know when to stop
+     */
+    argv[token_count] = NULL;
+    
+    /* Return token count to caller */
+    if (argc) *argc = token_count;
+    
+    return argv;
+}
+
+/*
+ * free_tokens() - Free memory allocated by parse_input()
+ * 
+ * MUST be called after parse_input() to prevent memory leaks!
+ */
+void free_tokens(char **argv)
+{
+    if (!argv) return;
+    
+    /* Free each token string */
+    for (int i = 0; argv[i] != NULL; i++) {
+        free(argv[i]);
+    }
+    
+    /* Free the argv array itself */
+    free(argv);
+}
+
+/*
+ * =============================================================================
+ * FULL TOKENIZER - Handles quotes, pipes, redirects, etc.
+ * =============================================================================
+ */
+
+/*
  * tokenizer_create() - Create a new tokenizer
  * 
  * Simple wrapper that allocates and initializes tokenizer struct.
