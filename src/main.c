@@ -430,6 +430,240 @@ void test_builtins(void)
 }
 
 /*
+ * =============================================================================
+ * PIPE TEST - Demonstrates pipe implementation
+ * =============================================================================
+ * 
+ * Run with: ./cshell --test-pipe
+ */
+
+/*
+ * test_pipe() - Test the execute_piped() function
+ * 
+ * Demonstrates:
+ * - Creating a pipe with pipe()
+ * - Forking two processes
+ * - dup2() to redirect stdin/stdout
+ * - Closing unused pipe ends
+ * 
+ * ASCII FLOW:
+ * 
+ *   ls PROCESS              KERNEL PIPE           grep PROCESS
+ *   ┌─────────┐          ┌─────────┐          ┌─────────┐
+ *   │ stdout   │──────────│ BUFFER  │──────────│ stdin   │
+ *   │ =pipe[1]│──write──▶│         │──read───│ =pipe[0]│
+ *   └─────────┘          └─────────┘          └─────────┘
+ */
+void test_pipe(void)
+{
+    printf("\n=== PIPE TEST ===\n\n");
+    fflush(stdout);
+    
+    /*
+     * TEST 1: ls | grep
+     * 
+     * This is THE classic pipe example.
+     * 
+     * What happens:
+     * 1. ls writes filenames to stdout
+     * 2. Pipe captures stdout
+     * 3. grep reads from stdin (pipe output)
+     * 4. grep filters for lines containing "c"
+     */
+    printf("Test 1: Running 'ls | grep c'\n");
+    printf("  ls writes filenames → pipe → grep reads → filters for 'c'\n");
+    printf("  Implementation:\n");
+    printf("    1. pipe(pipefd) creates IPC channel\n");
+    printf("    2. fork() creates ls process\n");
+    printf("    3. dup2(pipefd[1], STDOUT) redirects ls output\n");
+    printf("    4. fork() creates grep process\n");
+    printf("    5. dup2(pipefd[0], STDIN) redirects grep input\n");
+    printf("    6. Parent waits for both children\n\n");
+    fflush(stdout);
+    
+    char *left1[] = {"ls", NULL};
+    char *right1[] = {"grep", "c", NULL};
+    execute_piped(left1, right1);
+    
+    printf("\n");
+    
+    /*
+     * TEST 2: echo | wc
+     * 
+     * Count lines in "hello world"
+     */
+    printf("Test 2: Running 'echo hello world | wc -l'\n");
+    printf("  Counts number of lines\n\n");
+    fflush(stdout);
+    
+    char *left2[] = {"echo", "hello", "world", NULL};
+    char *right2[] = {"wc", "-l", NULL};
+    execute_piped(left2, right2);
+    
+    printf("\n");
+    
+    /*
+     * TEST 3: cat | head
+     * 
+     * Show first 3 lines of /etc/passwd
+     */
+    printf("Test 3: Running 'cat /etc/passwd | head -3'\n");
+    printf("  Shows first 3 lines of /etc/passwd\n\n");
+    fflush(stdout);
+    
+    char *left3[] = {"cat", "/etc/passwd", NULL};
+    char *right3[] = {"head", "-3", NULL};
+    execute_piped(left3, right3);
+    
+    printf("\n");
+    
+    /*
+     * TEST 4: ls -l | tail -5
+     * 
+     * Show last 5 files (using tail on ls output)
+     */
+    printf("Test 4: Running 'ls -l | tail -5'\n");
+    printf("  Shows last 5 items in current directory\n\n");
+    fflush(stdout);
+    
+    char *left4[] = {"ls", "-l", NULL};
+    char *right4[] = {"tail", "-5", NULL};
+    execute_piped(left4, right4);
+    
+    printf("\n");
+    
+    /*
+     * WHAT YOU JUST SAW:
+     * 
+     * The execute_piped() function:
+     * 1. Creates pipe with pipe()
+     * 2. Forks left process (producer)
+     *    - dup2(pipefd[1], STDOUT_FILENO)
+     *    - close(pipefd[0]) - don't read
+     *    - execvp(left_args)
+     * 3. Forks right process (consumer)
+     *    - dup2(pipefd[0], STDIN_FILENO)
+     *    - close(pipefd[1]) - don't write
+     *    - execvp(right_args)
+     * 4. Parent closes both ends, waits for children
+     * 
+     * THE CRITICAL PART:
+     * Closing unused pipe ends is essential!
+     * If you don't close pipefd[1] in grep,
+     * grep will never see EOF and will hang forever.
+     */
+    printf("KEY INSIGHT:\n");
+    printf("  Pipes connect stdout of LEFT to stdin of RIGHT\n");
+    printf("  dup2() redirects file descriptors\n");
+    printf("  ALWAYS close unused pipe ends!\n\n");
+    
+    printf("=== END PIPE TEST ===\n\n");
+}
+
+/*
+ * =============================================================================
+ * PIPE PARSER TEST - Demonstrates parsing piped commands
+ * =============================================================================
+ * 
+ * Run with: ./cshell --test-pipe-parse
+ */
+
+/*
+ * test_pipe_parse() - Test parsing piped commands
+ * 
+ * Demonstrates:
+ * - Finding | in token array
+ * - Splitting argv at pipe position
+ * - Executing with pipe
+ */
+void test_pipe_parse(void)
+{
+    char **left, **right;
+    char input[MAX_LINE];
+    
+    printf("\n=== PIPE PARSER TEST ===\n\n");
+    
+    /*
+     * TEST 1: Parse "ls | grep c"
+     */
+    printf("Test 1: Parsing 'ls | grep c'\n");
+    strcpy(input, "ls | grep c");
+    
+    int argc;
+    char **argv = parse_input(input, &argc);
+    printf("  Tokens: ");
+    for (int i = 0; i < argc; i++) {
+        printf("[%s] ", argv[i]);
+    }
+    printf("\n");
+    
+    int pipe_pos = find_pipe(argv);
+    printf("  Pipe position: %d\n", pipe_pos);
+    
+    split_at_pipe(argv, &left, &right);
+    printf("  Left side: ");
+    for (int i = 0; left[i]; i++) printf("[%s] ", left[i]);
+    printf("\n");
+    printf("  Right side: ");
+    for (int i = 0; right && right[i]; i++) printf("[%s] ", right[i]);
+    printf("\n\n");
+    
+    printf("  Executing...\n");
+    execute_piped(left, right);
+    
+    free(left);
+    if (right) free(right);
+    free_tokens(argv);
+    
+    /*
+     * TEST 2: Parse "cat /etc/passwd | head -5"
+     */
+    printf("\nTest 2: Parsing 'cat /etc/passwd | head -5'\n");
+    strcpy(input, "cat /etc/passwd | head -5");
+    
+    argv = parse_input(input, &argc);
+    printf("  Tokens: ");
+    for (int i = 0; i < argc; i++) {
+        printf("[%s] ", argv[i]);
+    }
+    printf("\n");
+    
+    split_at_pipe(argv, &left, &right);
+    printf("  Left: "); for (int i = 0; left[i]; i++) printf("[%s] ", left[i]);
+    printf("\n");
+    printf("  Right: "); for (int i = 0; right && right[i]; i++) printf("[%s] ", right[i]);
+    printf("\n\n");
+    
+    printf("  Executing...\n");
+    execute_piped(left, right);
+    
+    free(left);
+    if (right) free(right);
+    free_tokens(argv);
+    
+    /*
+     * TEST 3: Command without pipe
+     */
+    printf("\nTest 3: Parsing 'ls' (no pipe)\n");
+    strcpy(input, "ls");
+    
+    argv = parse_input(input, &argc);
+    split_at_pipe(argv, &left, &right);
+    printf("  Left: "); for (int i = 0; left[i]; i++) printf("[%s] ", left[i]);
+    printf("\n");
+    printf("  Right: %s\n\n", right ? "exists" : "NULL");
+    
+    printf("  Executing (simple, no pipe)...\n");
+    simple_execute(left);
+    
+    free(left);
+    if (right) free(right);
+    free_tokens(argv);
+    
+    printf("\n=== END PIPE PARSER TEST ===\n\n");
+}
+
+/*
  * add_to_history() - Add command to shell history
  * 
  * Uses the function from jobs.c - declared in shell.h
@@ -505,6 +739,14 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[1], "--test-builtins") == 0) {
             test_builtins();
+            return 0;
+        }
+        if (strcmp(argv[1], "--test-pipe") == 0) {
+            test_pipe();
+            return 0;
+        }
+        if (strcmp(argv[1], "--test-pipe-parse") == 0) {
+            test_pipe_parse();
             return 0;
         }
     }

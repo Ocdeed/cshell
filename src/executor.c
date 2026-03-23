@@ -215,6 +215,261 @@ void simple_execute(char **args)
 
 /*
  * =============================================================================
+ * PIPE IMPLEMENTATION - Educational version
+ * =============================================================================
+ */
+
+/*
+ * WHAT IS A PIPE?
+ * 
+ * A pipe is a one-way data channel implemented in the kernel:
+ * - Has a read end (fd[0]) and write end (fd[1])
+ * - Data written to fd[1] can be read from fd[0]
+ * - Kernel maintains a buffer (typically 4KB-64KB)
+ * - If buffer is full, writer blocks; if empty, reader blocks
+ * 
+ * ┌─────────────────────────────────────────────┐
+ * │              KERNEL PIPE BUFFER               │
+ * │   [written data bytes] ──────────────▶       │
+ * │   ◀───────────── [read data bytes]          │
+ * └─────────────────────────────────────────────┘
+ *              ↑                    ↑
+ *              │                    │
+ *         fd[1] (write)        fd[0] (read)
+ */
+
+/*
+ * execute_piped() - Execute two commands with a pipe between them
+ * 
+ * This implements: left_args | right_args
+ * 
+ * Example: execute_piped(["ls", NULL], ["grep", "c", NULL])
+ * This runs: ls | grep c
+ * 
+ * THE COMPLETE FLOW:
+ * 
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ STEP 1: Create pipe                                               │
+ * │   pipe(pipefd) → pipefd[0]=3 (read), pipefd[1]=4 (write)        │
+ * └─────────────────────────────────────────────────────────────────┘
+ *                              │
+ *                              ▼
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ STEP 2: Fork LEFT process (ls)                                   │
+ * │   fork() → returns child PID in parent, 0 in child              │
+ * └─────────────────────────────────────────────────────────────────┘
+ *                              │
+ *              ┌───────────────┴───────────────┐
+ *              ▼                               ▼
+ * ┌───────────────────────────┐   ┌───────────────────────────┐
+ * │ LEFT CHILD (ls)          │   │ PARENT                    │
+ * │ pid = 0                  │   │ pid = child PID           │
+ * │                          │   │                           │
+ * │ dup2(pipefd[1], STDOUT)  │   │ Continue to step 3...     │
+ * │ close(pipefd[0])         │   │                           │
+ * │ close(pipefd[1])         │   │                           │
+ * │ execvp("ls", ["ls",...])│   │                           │
+ * └───────────────────────────┘   └───────────────────────────┘
+ *              │
+ *              ▼
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ STEP 3: Fork RIGHT process (grep)                               │
+ * └─────────────────────────────────────────────────────────────────┘
+ *                              │
+ *              ┌───────────────┴───────────────┐
+ *              ▼                               ▼
+ * ┌───────────────────────────┐   ┌───────────────────────────┐
+ * │ RIGHT CHILD (grep)        │   │ PARENT                    │
+ * │ pid = 0                    │   │ pid = child PID           │
+ * │                           │   │                           │
+ * │ dup2(pipefd[0], STDIN)    │   │ Close pipe ends:          │
+ * │ close(pipefd[1])          │   │ close(pipefd[0])          │
+ * │ close(pipefd[0])          │   │ close(pipefd[1])          │
+ * │ execvp("grep", [...])     │   │                           │
+ * └───────────────────────────┘   │ waitpid() both children   │
+ *              │                  └───────────────────────────┘
+ *              │
+ *              ▼
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │ DATA FLOW (while processes run)                                  │
+ * │                                                                 │
+ * │   ls PROCESS ─── writes ──▶ [PIPE BUFFER] ─── reads ─── grep  │
+ * │   (stdout=pipefd[1])                    (stdin=pipefd[0])      │
+ * └─────────────────────────────────────────────────────────────────┘
+ */
+void execute_piped(char **left_args, char **right_args)
+{
+    int pipefd[2];      /* pipefd[0]=read, pipefd[1]=write */
+    pid_t left_pid;     /* PID of left process (ls) */
+    pid_t right_pid;    /* PID of right process (grep) */
+    
+    /*
+     * STEP 1: Create the pipe
+     * 
+     * pipe() creates a unidirectional channel:
+     * - pipefd[0] = read end (we READ from this)
+     * - pipefd[1] = write end (we WRITE to this)
+     * 
+     * The pipe exists in kernel memory - both processes
+     * access the same buffer through their file descriptors.
+     */
+    if (pipe(pipefd) < 0) {
+        perror("pipe");
+        return;
+    }
+    
+    /*
+     * STEP 2: Fork LEFT process (ls)
+     * 
+     * This fork creates the producer side of the pipe.
+     * The child will:
+     * 1. Redirect stdout TO the pipe
+     * 2. Run ls
+     */
+    left_pid = fork();
+    
+    if (left_pid < 0) {
+        /* Fork failed */
+        perror("fork");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return;
+    }
+    
+    if (left_pid == 0) {
+        /*
+         * LEFT CHILD PROCESS (ls)
+         * 
+         * dup2() redirects:
+         * - Original stdout (fd 1) → pipe write end (pipefd[1])
+         * - After this, printf() writes go to the pipe!
+         * 
+         * FILE DESCRIPTOR TABLE AFTER dup2:
+         * ┌────────┬─────────────────────┐
+         * │   0    │ stdin               │
+         * │   1    │ pipefd[1] (write)  │  ← stdout now points to pipe!
+         * │   2    │ stderr              │
+         * │   3    │ pipefd[0] (read)   │
+         * │   4    │ (closed)            │
+         * └────────┴─────────────────────┘
+         */
+        dup2(pipefd[1], STDOUT_FILENO);
+        
+        /*
+         * CRITICAL: Close all pipe ends we don't use!
+         * 
+         * Why close pipefd[0] (read end)?
+         * - This child only WRITES to the pipe
+         * - Not closing causes resource leak
+         * - If grep closes its write end, but we still have
+         *   an open write end, the read end won't get EOF!
+         * 
+         * Why close pipefd[1] after dup2?
+         * - dup2() already redirected stdout to pipefd[1]
+         * - Having an extra reference can cause issues
+         * - Best practice: close the original after dup2
+         */
+        close(pipefd[0]);  /* Don't need to read from pipe */
+        close(pipefd[1]);   /* Original fd, now redirected */
+        
+        /*
+         * Execute the left command
+         */
+        execvp(left_args[0], left_args);
+        
+        /* If execvp returns, it failed */
+        perror(left_args[0]);
+        _exit(127);
+    }
+    
+    /*
+     * STEP 3: Fork RIGHT process (grep)
+     * 
+     * This fork creates the consumer side of the pipe.
+     * The child will:
+     * 1. Redirect stdin FROM the pipe
+     * 2. Run grep
+     */
+    right_pid = fork();
+    
+    if (right_pid < 0) {
+        perror("fork");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return;
+    }
+    
+    if (right_pid == 0) {
+        /*
+         * RIGHT CHILD PROCESS (grep)
+         * 
+         * dup2() redirects:
+         * - Original stdin (fd 0) → pipe read end (pipefd[0])
+         * - After this, scanf()/getchar() reads from the pipe!
+         * 
+         * FILE DESCRIPTOR TABLE AFTER dup2:
+         * ┌────────┬─────────────────────┐
+         * │   0    │ pipefd[0] (read)   │  ← stdin now points to pipe!
+         * │   1    │ stdout              │
+         * │   2    │ stderr              │
+         * │   3    │ (closed)            │
+         * │   4    │ pipefd[1] (write)  │
+         * └────────┴─────────────────────┘
+         */
+        dup2(pipefd[0], STDIN_FILENO);
+        
+        /*
+         * CRITICAL: Close all pipe ends we don't use!
+         * 
+         * Why close pipefd[1] (write end)?
+         * - This child only READS from the pipe
+         * - Not closing: grep would never see EOF!
+         *   (EOF only comes when ALL write ends are closed)
+         */
+        close(pipefd[1]);  /* Don't need to write to pipe */
+        close(pipefd[0]);  /* Original fd, now redirected */
+        
+        /*
+         * Execute the right command
+         */
+        execvp(right_args[0], right_args);
+        
+        /* If execvp returns, it failed */
+        perror(right_args[0]);
+        _exit(127);
+    }
+    
+    /*
+     * STEP 4: Parent closes both ends and waits
+     * 
+     * The parent created the pipe and forked both children.
+     * Now the parent must:
+     * 1. Close its references to both pipe ends
+     * 2. Wait for both children to finish
+     * 
+     * IMPORTANT: Parent does NOT use the pipe!
+     * The parent just orchestrates the children.
+     */
+    
+    /* Close pipe ends in parent */
+    /* Parent doesn't read or write - children do all the work */
+    close(pipefd[0]);  /* Close read end - we don't read */
+    close(pipefd[1]);  /* Close write end - we don't write */
+    
+    /*
+     * Wait for both children
+     * 
+     * We use waitpid() to wait for each child:
+     * - Left process (ls) finishes first (produces all output)
+     * - Right process (grep) then gets EOF and finishes
+     * - Or both finish together
+     */
+    waitpid(left_pid, NULL, 0);   /* Wait for ls */
+    waitpid(right_pid, NULL, 0);  /* Wait for grep */
+}
+
+/*
+ * =============================================================================
  * FULL IMPLEMENTATION - fork_and_exec() with pipes and redirections
  * =============================================================================
  */

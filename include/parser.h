@@ -45,6 +45,28 @@ char **parse_input(char *input, int *argc);
 void free_tokens(char **argv);
 
 /*
+ * find_pipe() - Find the | character in argv
+ * 
+ * Returns: index of |, or -1 if not found
+ */
+int find_pipe(char **argv);
+
+/*
+ * split_at_pipe() - Split argv at the pipe character
+ * 
+ * left:  Left side of pipe (before |)
+ * right: Right side of pipe (after |)
+ */
+void split_at_pipe(char **argv, char ***left, char ***right);
+
+/*
+ * run_piped_command() - Parse and execute a piped command
+ * 
+ * Handles one pipe: left | right
+ */
+void run_piped_command(char *input);
+
+/*
  * =============================================================================
  * FULL TOKENIZER - Handles quotes, pipes, redirects, etc.
  * =============================================================================

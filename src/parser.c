@@ -17,6 +17,7 @@
 
 #include "../include/parser.h"
 #include "../include/shell.h"
+#include "../include/executor.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -189,6 +190,147 @@ void free_tokens(char **argv)
     
     /* Free the argv array itself */
     free(argv);
+}
+
+/*
+ * =============================================================================
+ * PIPE PARSING - Educational implementation
+ * =============================================================================
+ */
+
+/*
+ * find_pipe() - Find the | character in argv
+ * 
+ * Returns: index of | in argv, or -1 if not found
+ * 
+ * Example:
+ *   argv = ["ls", "-la", "|", "grep", "c", NULL]
+ *   find_pipe(argv) = 2
+ */
+int find_pipe(char **argv)
+{
+    int i;
+    
+    for (i = 0; argv[i] != NULL; i++) {
+        if (strcmp(argv[i], "|") == 0) {
+            return i;
+        }
+    }
+    
+    return -1;  /* No pipe found */
+}
+
+/*
+ * split_at_pipe() - Split argv at the pipe character
+ * 
+ * left:  Points to left side of pipe (before |)
+ * right: Points to right side of pipe (after |)
+ * 
+ * Example:
+ *   Input:  ["ls", "-la", "|", "grep", "c", NULL]
+ *   Output: left=["ls", "-la", NULL], right=["grep", "c", NULL]
+ * 
+ * The | token is NOT included in either side.
+ * Caller is responsible for freeing both arrays.
+ */
+void split_at_pipe(char **argv, char ***left, char ***right)
+{
+    int pipe_pos = find_pipe(argv);
+    
+    if (pipe_pos < 0) {
+        /* No pipe found - left gets everything, right is NULL */
+        *left = argv;
+        *right = NULL;
+        return;
+    }
+    
+    /* Count tokens on each side of pipe */
+    int left_count = 0;
+    for (int i = 0; i < pipe_pos; i++) {
+        left_count++;
+    }
+    
+    int right_count = 0;
+    for (int i = pipe_pos + 1; argv[i] != NULL; i++) {
+        right_count++;
+    }
+    
+    /* Allocate left array (NULL-terminated) */
+    *left = malloc((left_count + 1) * sizeof(char *));
+    for (int i = 0; i < left_count; i++) {
+        (*left)[i] = argv[i];
+    }
+    (*left)[left_count] = NULL;
+    
+    /* Allocate right array (NULL-terminated) */
+    if (right_count > 0) {
+        *right = malloc((right_count + 1) * sizeof(char *));
+        for (int i = 0; i < right_count; i++) {
+            (*right)[i] = argv[pipe_pos + 1 + i];
+        }
+        (*right)[right_count] = NULL;
+    } else {
+        *right = NULL;
+    }
+}
+
+/*
+ * run_piped_command() - Parse and execute a piped command
+ * 
+ * This is the SIMPLE version that handles ONE pipe.
+ * For multiple pipes, you'd call this recursively.
+ * 
+ * Input: "ls -la | grep c"
+ * 1. Parse into tokens: ["ls", "-la", "|", "grep", "c"]
+ * 2. Split at pipe
+ * 3. Execute with pipe
+ */
+void run_piped_command(char *input)
+{
+    int argc;
+    char **argv;
+    char **left, **right;
+    
+    /* Parse input into tokens */
+    argv = parse_input(input, &argc);
+    if (!argv || argc == 0) {
+        return;
+    }
+    
+    /* Find pipe position */
+    int pipe_pos = find_pipe(argv);
+    
+    if (pipe_pos < 0) {
+        /* No pipe - execute normally */
+        simple_execute(argv);
+        free_tokens(argv);
+        return;
+    }
+    
+    if (pipe_pos == 0) {
+        fprintf(stderr, "pipe: syntax error near unexpected token '|'\n");
+        free_tokens(argv);
+        return;
+    }
+    
+    if (argv[pipe_pos + 1] == NULL) {
+        fprintf(stderr, "pipe: syntax error near unexpected token '|'\n");
+        free_tokens(argv);
+        return;
+    }
+    
+    /* Split at pipe */
+    split_at_pipe(argv, &left, &right);
+    
+    /* Execute with pipe */
+    execute_piped(left, right);
+    
+    /* Free split arrays (but not the strings - they belong to argv) */
+    free(left);
+    if (right) free(right);
+    
+    /* Free original argv */
+    free_tokens(argv);
 }
 
 /*

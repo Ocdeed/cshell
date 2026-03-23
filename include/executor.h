@@ -42,6 +42,23 @@ int execute_command(shell_t *shell, command_t *cmd);
 void simple_execute(char **args);
 
 /*
+ * execute_piped() - Educational pipe implementation
+ * 
+ * left_args: command on LEFT side of pipe (produces output)
+ * right_args: command on RIGHT side of pipe (consumes input)
+ * 
+ * This implements: left_args | right_args
+ * Example: execute_piped(["ls", NULL], ["grep", "c", NULL])
+ * 
+ * Uses:
+ * - pipe() to create IPC channel
+ * - Two fork() calls (one per process)
+ * - dup2() to redirect stdin/stdout
+ * - Closes unused pipe ends
+ */
+void execute_piped(char **left_args, char **right_args);
+
+/*
  * execute_pipeline() - Execute a chain of commands connected by pipes
  * 
  * shell: Shell state structure  
