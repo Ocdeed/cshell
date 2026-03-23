@@ -285,6 +285,151 @@ void test_executor(void)
 }
 
 /*
+ * =============================================================================
+ * BUILTIN TEST - Demonstrates built-in commands
+ * =============================================================================
+ * 
+ * Run with: ./cshell --test-builtins
+ */
+
+/*
+ * test_builtins() - Test built-in commands
+ * 
+ * Demonstrates:
+ * - Built-ins run IN the shell process (no fork!)
+ * - cd changes shell's working directory
+ * - exit codes: 0 = success, non-zero = error
+ */
+void test_builtins(void)
+{
+    char *args[3];
+    int result;
+    
+    printf("\n=== BUILTIN TEST ===\n\n");
+    fflush(stdout);
+    
+    /* 
+     * TEST 1: Check if command is built-in
+     * 
+     * simple_is_builtin() decides: fork() or not?
+     */
+    printf("Test 1: Checking if commands are built-in\n");
+    printf("  simple_is_builtin(\"cd\") = %d (should be 1)\n", 
+           simple_is_builtin("cd"));
+    printf("  simple_is_builtin(\"pwd\") = %d (should be 1)\n", 
+           simple_is_builtin("pwd"));
+    printf("  simple_is_builtin(\"ls\") = %d (should be 0 - external!)\n", 
+           simple_is_builtin("ls"));
+    printf("  simple_is_builtin(\"echo\") = %d (should be 1)\n", 
+           simple_is_builtin("echo"));
+    printf("\n");
+    
+    /*
+     * TEST 2: pwd - Print working directory
+     * 
+     * Note: This COULD be /bin/pwd (external).
+     * Built-in version is faster (no fork/exec).
+     */
+    printf("Test 2: Running 'pwd' (built-in)\n");
+    printf("  Note: This runs IN the shell process, not forked!\n");
+    args[0] = "pwd";
+    args[1] = NULL;
+    result = simple_run_builtin(args);
+    printf("  Return value: %d (0 = success)\n\n", result);
+    fflush(stdout);
+    
+    /*
+     * TEST 3: cd - Change directory
+     * 
+     * WHY THIS MUST BE BUILT-IN:
+     * External /bin/cd would only change ITS working directory.
+     * Built-in changes THE SHELL'S working directory!
+     */
+    printf("Test 3: Running 'cd /tmp' (built-in)\n");
+    printf("  Before: ");
+    fflush(stdout);
+    args[0] = "pwd"; args[1] = NULL;
+    simple_run_builtin(args);
+    
+    args[0] = "cd";
+    args[1] = "/tmp";
+    args[2] = NULL;
+    result = simple_run_builtin(args);
+    
+    printf("  After: ");
+    fflush(stdout);
+    args[0] = "pwd"; args[1] = NULL;
+    simple_run_builtin(args);
+    printf("  Return value: %d\n\n", result);
+    
+    /*
+     * TEST 4: cd with no argument (go to HOME)
+     */
+    printf("Test 4: Running 'cd' (no argument - goes to HOME)\n");
+    args[0] = "cd";
+    args[1] = NULL;
+    result = simple_run_builtin(args);
+    printf("  Return value: %d\n\n", result);
+    fflush(stdout);
+    
+    /*
+     * TEST 5: cd with error
+     * 
+     * EXIT CODE: Return 1 means error occurred
+     * This allows shell to detect failures.
+     */
+    printf("Test 5: Running 'cd /nonexistent/directory' (should fail)\n");
+    args[0] = "cd";
+    args[1] = "/nonexistent/directory";
+    args[2] = NULL;
+    result = simple_run_builtin(args);
+    printf("  Return value: %d (non-zero = error!)\n\n", result);
+    fflush(stdout);
+    
+    /*
+     * TEST 6: echo with $VAR expansion
+     */
+    printf("Test 6: Running 'echo $HOME'\n");
+    args[0] = "echo";
+    args[1] = "$HOME";
+    args[2] = NULL;
+    simple_run_builtin(args);
+    printf("\n");
+    fflush(stdout);
+    
+    /*
+     * TEST 7: help
+     */
+    printf("Test 7: Running 'help'\n");
+    args[0] = "help";
+    args[1] = NULL;
+    simple_run_builtin(args);
+    printf("\n");
+    fflush(stdout);
+    
+    /*
+     * KEY INSIGHT:
+     * 
+     * Built-ins vs External Commands:
+     * 
+     * Built-in (cd, pwd, echo, exit):
+     * - Run in SHELL process (no fork!)
+     * - CAN modify shell state (cd changes cwd)
+     * - Faster (no fork/exec overhead)
+     * 
+     * External (/bin/ls, /bin/cat):
+     * - Run in CHILD process (fork required)
+     * - CANNOT modify shell state
+     * - Independent programs
+     */
+    printf("KEY INSIGHT:\n");
+    printf("  Built-ins run IN shell process - can modify shell state!\n");
+    printf("  External commands run in forked child - cannot affect shell!\n\n");
+    
+    printf("=== END BUILTIN TEST ===\n\n");
+}
+
+/*
  * add_to_history() - Add command to shell history
  * 
  * Uses the function from jobs.c - declared in shell.h
@@ -356,6 +501,10 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[1], "--test-executor") == 0) {
             test_executor();
+            return 0;
+        }
+        if (strcmp(argv[1], "--test-builtins") == 0) {
+            test_builtins();
             return 0;
         }
     }

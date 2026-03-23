@@ -24,6 +24,305 @@
 #include <errno.h>
 
 /*
+ * =============================================================================
+ * EDUCATIONAL IMPLEMENTATION - Simple Built-in Dispatcher
+ * =============================================================================
+ */
+
+/*
+ * WHY BUILT-INS CAN'T BE EXTERNAL PROCESSES:
+ * 
+ * Example: If "cd" was an external program (/bin/cd):
+ * 
+ *   Shell (pid=100)                    /bin/cd (pid=101)
+ *   cwd: /home/user                    cwd: (inherited /home/user)
+ *         │                                   │
+ *         │──── fork() ───────────────────────▶│
+ *         │      (creates child)                │
+ *         │                                    │ chdir("/tmp")
+ *         │                                    │ (changes ITS cwd)
+ *         │                                    │
+ *         │◀──────────── exit() ───────────────│
+ *         │
+ *   cwd: /home/user  ← UNCHANGED! Shell unaffected!
+ * 
+ * The shell's working directory NEVER changed!
+ * 
+ * BUT with built-in cd:
+ * 
+ *   Shell process (single process)
+ *   cwd: /home/user
+ *         │
+ *         │───── directly calls chdir() ───────▶│
+ *         │       (no fork!)                    │
+ *         │                                      │
+ *   cwd: /tmp  ← SHELL'S cwd CHANGED!
+ * 
+ * Built-ins run IN the shell process, so they CAN modify shell state.
+ */
+
+/*
+ * simple_is_builtin() - Check if a command is a built-in (educational)
+ * 
+ * This is the DISPATCHER - it decides whether to fork() or not.
+ * 
+ * Input:  cmd = "cd"
+ * Output: 1 if built-in, 0 if external command
+ * 
+ * WHY THIS MATTERS:
+ * Before fork(), we check if it's a built-in.
+ * If yes: run in shell process (no fork needed)
+ * If no:  fork() and run in child process
+ */
+int simple_is_builtin(const char *cmd)
+{
+    if (cmd == NULL) return 0;
+    
+    if (strcmp(cmd, "cd") == 0) return 1;
+    if (strcmp(cmd, "pwd") == 0) return 1;
+    if (strcmp(cmd, "exit") == 0) return 1;
+    if (strcmp(cmd, "echo") == 0) return 1;
+    if (strcmp(cmd, "help") == 0) return 1;
+    
+    return 0;  /* External command - needs fork() */
+}
+
+/*
+ * simple_run_builtin() - Execute a built-in command (educational)
+ * 
+ * These run IN THE CURRENT PROCESS (shell itself).
+ * No fork() needed - they modify shell state directly.
+ * 
+ * EXIT CODES EXPLAINED:
+ * 
+ * Convention:
+ * - Return 0 = success
+ * - Return non-zero (1, 2, ...) = error occurred
+ * 
+ * Why this matters:
+ * - Shell can check: if (simple_run_builtin() != 0) { error! }
+ * - $? variable holds exit status of last command
+ * - Piping/combining commands checks exit codes
+ * 
+ * Examples:
+ * - cd /nonexistent → returns 1 (error)
+ * - pwd → returns 0 (success)
+ * - exit 42 → exits with status 42
+  */
+
+/* Forward declarations */
+int simple_cd(char **args);
+int simple_pwd(char **args);
+int simple_exit(char **args);
+int simple_echo(char **args);
+int simple_help(char **args);
+
+int simple_run_builtin(char **args)
+{
+    if (strcmp(args[0], "cd") == 0) {
+        return simple_cd(args);
+    }
+    else if (strcmp(args[0], "pwd") == 0) {
+        return simple_pwd(args);
+    }
+    else if (strcmp(args[0], "exit") == 0) {
+        return simple_exit(args);
+    }
+    else if (strcmp(args[0], "echo") == 0) {
+        return simple_echo(args);
+    }
+    else if (strcmp(args[0], "help") == 0) {
+        return simple_help(args);
+    }
+    
+    return -1;  /* Should never reach here */
+}
+
+/*
+ * simple_cd() - Change directory (built-in)
+ * 
+ * WHY THIS MUST BE BUILT-IN:
+ * - chdir() changes the CURRENT PROCESS's working directory
+ * - If external: only /bin/cd's cwd would change, not shell's!
+ * 
+ * System calls used:
+ * - getcwd(): Get current working directory
+ * - chdir():   Change current working directory
+ * - getenv():  Get environment variable (HOME)
+ */
+int simple_cd(char **args)
+{
+    char *path;
+    char cwd[MAX_LINE];
+    
+    /*
+     * Step 1: Save current directory for cd - (go back)
+     * 
+     * We need to remember where we ARE before we change.
+     * This enables "cd -" to return to previous directory.
+     */
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        perror("getcwd");
+        return 1;
+    }
+    
+    /*
+     * Step 2: Determine where to go
+     * 
+     * Cases:
+     * - cd          → go to $HOME
+     * - cd /path    → go to /path
+     * - cd ..       → go to parent directory
+     * - cd -        → go to previous directory
+     */
+    if (args[1] == NULL) {
+        /* No argument: go to HOME */
+        path = getenv("HOME");
+        if (path == NULL) {
+            fprintf(stderr, "cd: HOME not set\n");
+            return 1;
+        }
+    }
+    else if (strcmp(args[1], "-") == 0) {
+        /* cd -: go to previous directory */
+        /* TODO: Store previous directory in shell state */
+        fprintf(stderr, "cd: OLDPWD not set\n");
+        return 1;
+    }
+    else {
+        /* Normal path argument */
+        path = args[1];
+    }
+    
+    /*
+     * Step 3: Change directory
+     * 
+     * chdir() returns:
+     * - 0 on success
+     * - -1 on error (errno set)
+     */
+    if (chdir(path) != 0) {
+        perror("cd");  /* Prints: cd: /path: No such file or directory */
+        return 1;       /* Signal error to caller */
+    }
+    
+    /*
+     * Step 4: Print new directory (like bash does)
+     * Optional: helps user confirm where they are
+     */
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("%s\n", cwd);
+    }
+    
+    return 0;  /* Success */
+}
+
+/*
+ * run_pwd() - Print working directory (built-in)
+ * 
+ * This COULD be an external command (/bin/pwd exists).
+ * But built-in is faster (no fork/exec overhead).
+ */
+int simple_pwd(char **args)
+{
+    char cwd[MAX_LINE];
+    
+    (void)args;  /* Unused parameter */
+    
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("%s\n", cwd);
+        return 0;  /* Success */
+    }
+    
+    perror("pwd");
+    return 1;  /* Error */
+}
+
+/*
+ * run_exit() - Exit the shell (built-in)
+ * 
+ * WHY THIS MUST BE BUILT-IN:
+ * - Must terminate THE SHELL process, not a child!
+ * - External command would exit the child, shell keeps running
+ */
+int simple_exit(char **args)
+{
+    int status = 0;
+    
+    /*
+     * Exit status:
+     * - exit        → status 0
+     * - exit 1      → status 1
+     * - exit 127    → status 127
+     * 
+     * Default is 0 (success)
+     */
+    if (args[1] != NULL) {
+        status = atoi(args[1]);
+    }
+    
+    printf("Exiting with status %d\n", status);
+    
+    /*
+     * exit() vs _exit():
+     * - exit()  : flushes buffers, calls atexit handlers, THEN terminates
+     * - _exit() : immediate termination (used in child after exec fails)
+     * 
+     * For the shell itself, use exit() for clean shutdown.
+     */
+    exit(status);
+    
+    return 0;  /* Never reached */
+}
+
+/*
+ * run_echo() - Echo arguments (built-in)
+ * 
+ * This could be /bin/echo, but built-in is faster.
+ */
+int simple_echo(char **args)
+{
+    int i;
+    
+    for (i = 1; args[i] != NULL; i++) {
+        /* Handle $VAR expansion */
+        if (args[i][0] == '$') {
+            char *val = getenv(args[i] + 1);  /* Skip $ */
+            if (val) printf("%s", val);
+        } else {
+            printf("%s", args[i]);
+        }
+        if (args[i + 1]) printf(" ");
+    }
+    printf("\n");
+    
+    return 0;
+}
+
+/*
+ * run_help() - Show built-in commands
+ */
+int simple_help(char **args)
+{
+    (void)args;  /* Unused */
+    
+    printf("cshell built-in commands:\n");
+    printf("  cd     - Change directory\n");
+    printf("  pwd    - Print working directory\n");
+    printf("  exit   - Exit the shell\n");
+    printf("  echo   - Echo arguments\n");
+    printf("  help   - Show this help\n");
+    
+    return 0;
+}
+
+/*
+ * =============================================================================
+ * FULL IMPLEMENTATION - Command table with function pointers
+ * =============================================================================
+ */
+
+/*
  * Built-in command table
  * 
  * This array defines all built-in commands.

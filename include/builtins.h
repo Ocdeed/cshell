@@ -16,6 +16,37 @@
 #include "shell.h"
 
 /*
+ * =============================================================================
+ * EDUCATIONAL IMPLEMENTATION - Simple Built-in Dispatcher
+ * =============================================================================
+ */
+
+/*
+ * simple_is_builtin() - Check if command is built-in (educational)
+ * 
+ * This is the DISPATCHER - decides whether to fork() or not.
+ * 
+ * Returns: 1 if built-in, 0 if external command
+ */
+int simple_is_builtin(const char *cmd);
+
+/*
+ * simple_run_builtin() - Execute a built-in command (educational)
+ * 
+ * These run IN THE CURRENT PROCESS (shell itself).
+ * No fork() needed - they modify shell state directly.
+ * 
+ * Returns: 0 on success, non-zero on error
+ */
+int simple_run_builtin(char **args);
+
+/*
+ * =============================================================================
+ * FULL IMPLEMENTATION - Command table with function pointers
+ * =============================================================================
+ */
+
+/*
  * Structure defining a built-in command
  */
 typedef struct {
