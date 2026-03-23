@@ -470,6 +470,119 @@ void execute_piped(char **left_args, char **right_args)
 
 /*
  * =============================================================================
+ * REDIRECTION - Educational implementation
+ * =============================================================================
+ */
+
+/*
+ * WHAT IS I/O REDIRECTION?
+ * 
+ * stdin/stdout/stderr are just file descriptors 0/1/2:
+ * 
+ * ┌────────┬──────────────────┐
+ * │   0    │ stdin (keyboard) │
+ * │   1    │ stdout (terminal)│
+ * │   2    │ stderr (terminal)│
+ * └────────┴──────────────────┘
+ * 
+ * Redirection changes where these point.
+ */
+
+/*
+ * find_redirection() - Find redirection operator in args
+ * 
+ * Returns index of >, >>, or <, or -1 if none found
+ */
+int find_redirection(char **args)
+{
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], ">") == 0 ||
+            strcmp(args[i], ">>") == 0 ||
+            strcmp(args[i], "<") == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+ * handle_redirection() - Execute with I/O redirection
+ * 
+ * This is the EDUCATIONAL version. The key insight:
+ * 
+ * We must SAVE the original stdout/stderr BEFORE redirecting,
+ * and RESTORE it AFTER the command runs!
+ * 
+ * THE BUG: If we don't restore, all printf() calls go to the file!
+ */
+int handle_redirection(char **args)
+{
+    int redir_pos = find_redirection(args);
+    
+    if (redir_pos < 0) {
+        simple_execute(args);
+        return 0;
+    }
+    
+    char *op = args[redir_pos];
+    char *filename = args[redir_pos + 1];
+    
+    if (filename == NULL) {
+        fprintf(stderr, "Expected filename after '%s'\n", op);
+        return 1;
+    }
+    
+    int target_fd = STDOUT_FILENO;
+    int flags;
+    
+    if (strcmp(op, ">") == 0) {
+        flags = O_WRONLY | O_CREAT | O_TRUNC;
+        target_fd = STDOUT_FILENO;
+    }
+    else if (strcmp(op, ">>") == 0) {
+        flags = O_WRONLY | O_CREAT | O_APPEND;
+        target_fd = STDOUT_FILENO;
+    }
+    else if (strcmp(op, "<") == 0) {
+        flags = O_RDONLY;
+        target_fd = STDIN_FILENO;
+    }
+    else {
+        fprintf(stderr, "Unknown operator: %s\n", op);
+        return 1;
+    }
+    
+    /* KEY FIX: Save original fd before redirecting */
+    int saved_fd = dup(target_fd);
+    
+    /* Open file */
+    int fd = open(filename, flags, 0644);
+    if (fd < 0) {
+        perror(filename);
+        close(saved_fd);
+        return 1;
+    }
+    
+    /* Redirect */
+    dup2(fd, target_fd);
+    close(fd);
+    
+    /* Strip redirection from args */
+    args[redir_pos] = NULL;
+    args[redir_pos + 1] = NULL;
+    
+    /* Execute */
+    simple_execute(args);
+    
+    /* KEY FIX: Restore original fd after command! */
+    dup2(saved_fd, target_fd);
+    close(saved_fd);
+    
+    return 0;
+}
+
+/*
+ * =============================================================================
  * FULL IMPLEMENTATION - fork_and_exec() with pipes and redirections
  * =============================================================================
  */

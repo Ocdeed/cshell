@@ -562,6 +562,91 @@ void test_pipe(void)
 
 /*
  * =============================================================================
+ * REDIRECT TEST - Demonstrates I/O redirection
+ * =============================================================================
+ * 
+ * Run with: ./cshell --test-redirect
+ */
+
+/*
+ * test_redirect() - Test handle_redirection()
+ * 
+ * Demonstrates:
+ * - > (stdout to file, truncate)
+ * - >> (stdout to file, append)
+ * - < (file to stdin)
+ */
+void test_redirect(void)
+{
+    char *args[MAX_ARGS];
+    FILE *f;
+    char buffer[256];
+    
+    printf("\n=== REDIRECT TEST ===\n\n");
+    fflush(stdout);
+    
+    /* TEST 1: > (truncate) */
+    printf("Test 1: echo 'hello world' > /tmp/test_redirect.txt\n");
+    fflush(stdout);
+    
+    args[0] = "echo"; args[1] = "hello"; args[2] = "world";
+    args[3] = ">"; args[4] = "/tmp/test_redirect.txt";
+    args[5] = NULL;
+    
+    handle_redirection(args);
+    
+    printf("Contents of file:\n");
+    fflush(stdout);
+    f = fopen("/tmp/test_redirect.txt", "r");
+    if (f) {
+        while (fgets(buffer, sizeof(buffer), f)) printf("  %s", buffer);
+        fclose(f);
+    }
+    printf("\n");
+    
+    /* TEST 2: >> (append) */
+    printf("Test 2: echo 'more text' >> /tmp/test_redirect.txt\n");
+    fflush(stdout);
+    
+    args[0] = "echo"; args[1] = "more"; args[2] = "text";
+    args[3] = ">>"; args[4] = "/tmp/test_redirect.txt";
+    args[5] = NULL;
+    
+    handle_redirection(args);
+    
+    printf("Contents (both lines now):\n");
+    fflush(stdout);
+    f = fopen("/tmp/test_redirect.txt", "r");
+    if (f) {
+        while (fgets(buffer, sizeof(buffer), f)) printf("  %s", buffer);
+        fclose(f);
+    }
+    printf("\n");
+    
+    /* TEST 3: < (input redirect) */
+    printf("Test 3: wc -l < /tmp/test_redirect.txt\n");
+    fflush(stdout);
+    
+    args[0] = "wc"; args[1] = "-l";
+    args[2] = "<"; args[3] = "/tmp/test_redirect.txt";
+    args[4] = NULL;
+    
+    handle_redirection(args);
+    printf("\n");
+    
+    /* CLEANUP */
+    unlink("/tmp/test_redirect.txt");
+    
+    printf("KEY INSIGHTS:\n");
+    printf("  >  truncates file, >> appends\n");
+    printf("  open() + dup2() redirects file descriptors\n");
+    printf("  Must RESTORE stdout after redirect!\n\n");
+    
+    printf("=== END REDIRECT TEST ===\n\n");
+}
+
+/*
+ * =============================================================================
  * PIPE PARSER TEST - Demonstrates parsing piped commands
  * =============================================================================
  * 
@@ -747,6 +832,10 @@ int main(int argc, char **argv)
         }
         if (strcmp(argv[1], "--test-pipe-parse") == 0) {
             test_pipe_parse();
+            return 0;
+        }
+        if (strcmp(argv[1], "--test-redirect") == 0) {
+            test_redirect();
             return 0;
         }
     }
