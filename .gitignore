@@ -1,0 +1,20 @@
+# Build artifacts
+cshell
+obj/
+*.o
+*.a
+
+# Debug files
+*.dSYM
+*.gdb
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test output
+test.txt
+testfile.txt
+out.txt
