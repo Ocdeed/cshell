@@ -32,6 +32,16 @@
 int execute_command(shell_t *shell, command_t *cmd);
 
 /*
+ * simple_execute() - Educational fork/exec/wait implementation
+ * 
+ * args: NULL-terminated array of arguments (like argv)
+ * 
+ * This is a simpler version for learning.
+ * See execute_command() for the full implementation.
+ */
+void simple_execute(char **args);
+
+/*
  * execute_pipeline() - Execute a chain of commands connected by pipes
  * 
  * shell: Shell state structure  

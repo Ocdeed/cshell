@@ -22,6 +22,7 @@
 
 #include "../include/shell.h"
 #include "../include/parser.h"
+#include "../include/executor.h"
 #include "../include/builtins.h"
 #include "../include/jobs.h"
 #include <stdio.h>
@@ -195,6 +196,95 @@ char *read_input(void)
 }
 
 /*
+ * =============================================================================
+ * EXECUTOR TEST - Demonstrates fork/exec/wait
+ * =============================================================================
+ * 
+ * Run with: ./cshell --test-executor
+ */
+
+/*
+ * test_executor() - Test the simple_execute() function
+ * 
+ * Demonstrates:
+ * - fork() creates child process
+ * - execvp() runs external command
+ * - waitpid() waits for child
+ */
+void test_executor(void)
+{
+    printf("\n=== EXECUTOR TEST ===\n\n");
+    fflush(stdout);
+    
+    /*
+     * TEST 1: Simple ls command
+     * 
+     * We pass: ["ls", "-l", NULL]
+     * execvp() searches PATH and runs /bin/ls -l
+     */
+    printf("Test 1: Running 'ls -l'\n");
+    fflush(stdout);
+    char *args1[] = {"ls", "-l", NULL};
+    simple_execute(args1);
+    printf("Returned from simple_execute()\n\n");
+    fflush(stdout);
+    
+    /*
+     * TEST 2: pwd command
+     * 
+     * Demonstrates that execvp() works with PATH search
+     */
+    printf("Test 2: Running 'pwd'\n");
+    fflush(stdout);
+    char *args2[] = {"pwd", NULL};
+    simple_execute(args2);
+    printf("Returned from simple_execute()\n\n");
+    fflush(stdout);
+    
+    /*
+     * TEST 3: echo with arguments
+     * 
+     * The shell parses "echo hello world" into:
+     * ["echo", "hello", "world", NULL]
+     */
+    printf("Test 3: Running 'echo hello world'\n");
+    fflush(stdout);
+    char *args3[] = {"echo", "hello", "world", NULL};
+    simple_execute(args3);
+    printf("Returned from simple_execute()\n\n");
+    fflush(stdout);
+    
+    /*
+     * TEST 4: Command not found
+     * 
+     * What happens when execvp() fails?
+     * - execvp() returns -1
+     * - Child prints error and exits
+     * - Parent continues normally
+     */
+    printf("Test 4: Running 'nonexistent_command'\n");
+    fflush(stdout);
+    printf("This should print an error...\n");
+    fflush(stdout);
+    char *args4[] = {"nonexistent_command", NULL};
+    simple_execute(args4);
+    printf("Parent continues after failed exec!\n\n");
+    fflush(stdout);
+    
+    /*
+     * WHAT YOU JUST SAW:
+     * 
+     * Each simple_execute() call:
+     * 1. fork() created a child process
+     * 2. Child ran the command (ls, pwd, echo)
+     * 3. Parent waited for child to finish
+     * 4. Control returned to shell
+     */
+    
+    printf("=== END EXECUTOR TEST ===\n\n");
+}
+
+/*
  * add_to_history() - Add command to shell history
  * 
  * Uses the function from jobs.c - declared in shell.h
@@ -259,9 +349,15 @@ int main(int argc, char **argv)
     char *line = NULL;
     
     /* Check for test mode */
-    if (argc > 1 && strcmp(argv[1], "--test-parser") == 0) {
-        test_parser();
-        return 0;
+    if (argc > 1) {
+        if (strcmp(argv[1], "--test-parser") == 0) {
+            test_parser();
+            return 0;
+        }
+        if (strcmp(argv[1], "--test-executor") == 0) {
+            test_executor();
+            return 0;
+        }
     }
     
     /* Initialize shell state (jobs list, etc.) */
